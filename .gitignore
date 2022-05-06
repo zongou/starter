@@ -1,0 +1,4 @@
+*.exe
+starter
+test/
+.vscode
