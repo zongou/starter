@@ -1,113 +1,71 @@
-// first, read k-v from ini
-// second, setup env
-// third, runs commands
-// fourth, start programs
-
-#include <libgen.h>
-#include <stdio.h>
-#include <stdlib.h>
+// read k-v from config
+// setup env
+// setup path
+// start programs
 
 #ifdef __WINNT__
 #include <windows.h>
 #include <strsafe.h>
 #endif
 
+#include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define MAX_BUF_LEN 1024
 #define MAX_KEY_LEN 64
 #define MAX_VAL_LEN 256
 #define BUFSIZE 4096
 
-int setup_env();
-int run_commands();
-int start_program();
-
 int readArgs(int argc, char *argv[]) { return 0; }
 
-int Trim(char s[]) {
-  int n;
-  for (n = strlen(s) - 1; n >= 0; n--) {
-    if (s[n] != ' ' && s[n] != '\t' && s[n] != '\n')
-      break;
-    s[n + 1] = '\0';
-  }
-  return n;
-}
+int setup_env(char *v, int line_number) {
+  // arg example: env=relative,JAVA_HOME,./jdk/jdk11/
+  char delimiter[] = ",";
 
-int loadConfigDemo(const char *config_path) {
-  FILE *file = fopen(config_path, "r");
-  if (file == NULL) {
-    printf("[Error]open %s failed.\n", config_path);
-    return -1;
-  }
+  char *ptr = strtok(v, delimiter);
 
-  char buf[MAX_BUF_LEN];
-  int text_comment = 0;
-  while (fgets(buf, MAX_BUF_LEN, file) != NULL) {
-    Trim(buf);
-    // to skip text comment with flags /* ... */
-    if (buf[0] != '#' && (buf[0] != '/' || buf[1] != '/')) {
-      if (strstr(buf, "/*") != NULL) {
-        text_comment = 1;
-        continue;
-      } else if (strstr(buf, "*/") != NULL) {
-        text_comment = 0;
-        continue;
-      }
-    }
-    if (text_comment == 1) {
-      continue;
-    }
+  const int MAX_SIZE = 3;
+  char *data[MAX_SIZE];
 
-    int buf_len = strlen(buf);
-    // ignore and skip the line with first chracter '#', '=' or '/'
-    if (buf_len <= 1 || buf[0] == '#' || buf[0] == '=' || buf[0] == '/') {
-      continue;
-    }
-    buf[buf_len - 1] = '\0';
+  for (int line_numberer = 0; ptr != NULL; line_numberer++) {
 
-    char _paramk[MAX_KEY_LEN] = {0}, _paramv[MAX_VAL_LEN] = {0};
-    int _kv = 0, _klen = 0, _vlen = 0;
-    int i = 0;
-    for (i = 0; i < buf_len; ++i) {
-      // if (buf[i] == ' ')
-      //   continue;
-      // scan param key name
-      if (_kv == 0 && buf[i] != '=') {
-        if (_klen >= MAX_KEY_LEN)
-          break;
-        _paramk[_klen++] = buf[i];
-        continue;
-      } else if (buf[i] == '=') {
-        _kv = 1;
-        continue;
-      }
-      // scan param key value
-      if (_vlen >= MAX_VAL_LEN || buf[i] == '#')
-        break;
-      _paramv[_vlen++] = buf[i];
-    }
-    if (strcmp(_paramk, "") == 0 || strcmp(_paramv, "") == 0)
-      continue;
-    // printf("%s=%s\n", _paramk, _paramv);
+    if (line_numberer < MAX_SIZE) {
+      data[line_numberer] = ptr;
+      ptr = strtok(NULL, delimiter);
 
-    if (strcasecmp(_paramk, "PATH") == 0) {
-      setup_env(_paramv);
-    } else if (strcasecmp(_paramk, "COMMAND") == 0) {
-      run_commands(_paramv);
-    } else if (strcasecmp(_paramk, "PROGRAM") == 0) {
-      start_program(_paramv);
+    } else {
+      printf("[Error]config file line %d error\n", line_number);
+      return 1;
     }
   }
+
+#ifdef __WINNT__
+  char *env_value;
+  if(strcasecmp(data[0], "static")==0){
+    env_value=data[2];
+  }else if (strcasecmp(data[0], "relative")==0) {
+    char canonicalPath[MAX_PATH];
+    GetFullPathName(data[2], MAX_PATH, canonicalPath, 0);
+    env_value=canonicalPath;
+  }
+  else {
+    printf("[Error]config file line %d error", line_number);
+    return 1;
+  }
+
+  if (!SetEnvironmentVariable(data[1], env_value)) {
+    printf("SetEnvironmentVariable failed (%lu)\n", GetLastError());
+    return 1;
+  }
+#else
+#endif
   return 0;
 }
 
-int setup_env(char *v) {
-
-#ifdef __linux__
-  char *path = getenv("PATH");
-  path = strcat(path, v);
-  path = strcat(path, ":");
-#elifdef __WINNT__
+int setup_path(char *v, int line_number) {
+#ifdef __WINNT__
   DWORD dwRet, dwErr;
   BOOL fExist, fSuccess;
   LPTSTR pszOldVal = malloc(BUFSIZE * sizeof(TCHAR));
@@ -116,19 +74,19 @@ int setup_env(char *v) {
   if (dwRet == 0) {
     dwErr = GetLastError();
     if (ERROR_ENVVAR_NOT_FOUND == dwErr) {
-      printf("Environment variable does not exist.\n");
-      fExist = FALSE;
+      printf("Environment variable %s does not exist.\n", VARNAME);
+      fExist = 1;
     }
   } else if (BUFSIZE < dwRet) {
     pszOldVal = (LPTSTR)realloc(pszOldVal, dwRet * sizeof(TCHAR));
     if (NULL == pszOldVal) {
       printf("Out of memory\n");
-      return FALSE;
+      return 1;
     }
     dwRet = GetEnvironmentVariable(VARNAME, pszOldVal, dwRet);
     if (!dwRet) {
-      printf("GetEnvironmentVariable failed (%d)\n", GetLastError());
-      return FALSE;
+      printf("GetEnvironmentVariable failed (%lu)\n", GetLastError());
+      return 1;
     } else
       fExist = TRUE;
   } else
@@ -149,19 +107,18 @@ int setup_env(char *v) {
   }
 
   if (!SetEnvironmentVariable(VARNAME, pszOldVal)) {
-    printf("SetEnvironmentVariable failed (%d)\n", GetLastError());
-    return FALSE;
+    printf("SetEnvironmentVariable failed (%lu)\n", GetLastError());
+    return 1;
   }
   free(pszOldVal);
+#elifdef __linux__
+  char *path = getenv("PATH");
+  path = strcat(path, v);
+  path = strcat(path, ":");
 #else
   path = strcat(path, ":");
 #endif
   // putenv(path);
-  return 0;
-}
-
-int run_commands(char *v) {
-  printf("run commands here\n");
   return 0;
 }
 
@@ -193,16 +150,124 @@ int start_program(char *v) {
                            &si,     // Pointer to STARTUPINFO structure
                            &pi);    // Pointer to PROCESS_INFORMATION structure
   if (!fSuccess) {
-    printf("CreateProcess failed (%d)\n", GetLastError());
+    printf("CreateProcess failed (%lu)\n", GetLastError());
   }
   WaitForSingleObject(pi.hProcess, INFINITE);
   CloseHandle(pi.hProcess);
   CloseHandle(pi.hThread);
-  return fSuccess;
 #elifndef __linux__
   printf("start program on linux");
 #endif
   return 0;
 }
 
-int main(int argc, char *argv[]) { loadConfigDemo("./config.ini"); }
+int Trim(char s[]) {
+  int n;
+  for (n = strlen(s) - 1; n >= 0; n--) {
+    if (s[n] != ' ' && s[n] != '\t' && s[n] != '\n')
+      break;
+    s[n + 1] = '\0';
+  }
+  return n;
+}
+
+int loadConfigDemo(const char *config_path) {
+  FILE *file = fopen(config_path, "r");
+  if (file == NULL) {
+    printf("[Error]open %s failed.\n", config_path);
+    return -1;
+  }
+  int line_number = 0;
+
+  char buf[MAX_BUF_LEN];
+  int text_comment = 0;
+  while (fgets(buf, MAX_BUF_LEN, file) != NULL) {
+    Trim(buf);
+    // to skip text comment with flags /* ... */
+    if (buf[0] != '#' && (buf[0] != '/' || buf[1] != '/')) {
+      if (strstr(buf, "/*") != NULL) {
+        text_comment = 1;
+        line_number++;
+        continue;
+      } else if (strstr(buf, "*/") != NULL) {
+        text_comment = 0;
+        line_number++;
+        continue;
+      }
+    }
+    if (text_comment == 1) {
+      line_number++;
+      continue;
+    }
+
+    int buf_len = strlen(buf);
+    // ignore and skip the line with first chracter '#', '=' or '/'
+    if (buf_len <= 1 || buf[0] == '#' || buf[0] == '=' || buf[0] == '/' ||
+        buf[0] == ';') {
+      line_number++;
+      continue;
+    }
+    buf[buf_len - 1] = '\0';
+
+    char _paramk[MAX_KEY_LEN] = {0}, _paramv[MAX_VAL_LEN] = {0};
+    int _kv = 0, _klen = 0, _vlen = 0;
+    int i = 0;
+    for (i = 0; i < buf_len; ++i) {
+      // if (buf[i] == ' ')
+      //   continue;
+      // scan param key name
+      if (_kv == 0 && buf[i] != '=') {
+        if (_klen >= MAX_KEY_LEN){
+          line_number++;
+          break;
+        }
+        _paramk[_klen++] = buf[i];
+        continue;
+      } else if (buf[i] == '=') {
+        _kv = 1;
+        line_number++;
+        continue;
+      }
+      // scan param key value
+      if (_vlen >= MAX_VAL_LEN || buf[i] == '#'){
+        line_number++;
+        break;
+      }
+      _paramv[_vlen++] = buf[i];
+    }
+    if (strcmp(_paramk, "") == 0 || strcmp(_paramv, "") == 0){
+      line_number++;
+      continue;
+    }
+    printf("%s=%s\n", _paramk, _paramv);
+
+    if (strcasecmp(_paramk, "PATH") == 0) {
+      if(setup_path(_paramv, line_number)) return 1;
+    } else if (strcasecmp(_paramk, "ENV") == 0) {
+      if(setup_env(_paramv, line_number)) return 1;
+    } else if (strcasecmp(_paramk, "PROGRAM") == 0) {
+      if(start_program(_paramv)) return 1;
+    }
+  }
+  return 0;
+}
+
+int hide_console() {
+#ifdef __WINNT__
+  HWND hwnd;
+  hwnd = FindWindow("ConsoleWindowClass", NULL);
+  if (hwnd) {
+    ShowWindow(hwnd, SW_HIDE); //设置指定窗口的显示状态
+  }
+  // MessageBoxW(NULL,L"控制台已隐藏",L"提示",MB_OK);
+#endif
+  return 0;
+}
+
+int main(int argc, char *argv[]) {
+  hide_console();
+  if(loadConfigDemo("./starter.conf")){
+    return 1;
+  }
+  return 0;
+}
